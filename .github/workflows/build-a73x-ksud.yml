@@ -22,7 +22,20 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libclang-dev protobuf-compiler
+          sudo apt-get install -y \
+            build-essential pkg-config clang libclang-dev llvm-dev protobuf-compiler
+
+      - name: Locate libclang for Rust bindgen
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIBCLANG_SO="$(find /usr/lib/llvm-* -name libclang.so -print -quit 2>/dev/null || true)"
+          if [[ -z "$LIBCLANG_SO" ]]; then
+            echo "::error::libclang.so was not found after installing libclang-dev"
+            exit 1
+          fi
+          echo "LIBCLANG_PATH=$(dirname "$LIBCLANG_SO")" >> "$GITHUB_ENV"
+          echo "Found libclang: $LIBCLANG_SO"
 
       - name: Checkout matching KernelSU version and Samsung patch
         shell: bash
@@ -45,7 +58,6 @@ jobs:
           BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           test -x "$BIN/aarch64-linux-android35-clang"
           export PATH="$BIN:$PATH"
-          export LIBCLANG_PATH="$BIN"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android35-clang"
           export CC_aarch64_linux_android="$BIN/aarch64-linux-android35-clang"
           export AR_aarch64_linux_android="$BIN/llvm-ar"
