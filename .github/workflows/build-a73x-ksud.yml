@@ -1,0 +1,65 @@
+name: Build A73x KernelSU daemon
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout payload fork
+        uses: actions/checkout@v4
+
+      - name: Install Rust target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-linux-android --toolchain stable
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libclang-dev protobuf-compiler
+
+      - name: Checkout matching KernelSU version and Samsung patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/tiann/KernelSU.git KernelSU
+          cd KernelSU
+          git checkout b0bc817b4e966aa6aa830834eaf6ef765d821d40
+          git apply ../kernelsu/patches/KernelSU-v3.2.5-samsung-kdp-rkp-defex.patch
+
+      - name: Build arm64 Android ksud
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
+          if [[ -z "$NDK" || ! -d "$NDK" ]]; then
+            echo 'Android NDK missing on runner' >&2
+            exit 1
+          fi
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$BIN/aarch64-linux-android35-clang"
+          export PATH="$BIN:$PATH"
+          export LIBCLANG_PATH="$BIN"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android35-clang"
+          export CC_aarch64_linux_android="$BIN/aarch64-linux-android35-clang"
+          export AR_aarch64_linux_android="$BIN/llvm-ar"
+          cd KernelSU
+          cargo +stable build --locked --release --target aarch64-linux-android -p ksud
+          mkdir -p ../dist
+          cp target/aarch64-linux-android/release/ksud ../dist/ksud-a73x-android-arm64
+          file ../dist/ksud-a73x-android-arm64
+          sha256sum ../dist/ksud-a73x-android-arm64 > ../dist/SHA256SUMS
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: a73x-ksud-arm64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
